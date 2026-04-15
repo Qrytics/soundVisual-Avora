@@ -15,24 +15,56 @@ import {
   BALL_RADIUS,
   SILENCE_TIMEOUT,
   SILENCE_VOLUME_THRESHOLD,
+  AUTO_RELAUNCH_VOLUME_MULTIPLIER,
   LAUNCH_SPEED,
   MAX_CRACKS,
+  BOUNCE_ANGLE_JITTER,
+  INTERIOR_CRACK_START_FRACTION,
+  INTERIOR_CRACK_MAX_INTERVAL,
+  INTERIOR_CRACK_INTERVAL_RANGE,
+  TRAIL_STEP_PX,
+  TRAIL_MAX_STEPS,
 } from '@/lib/constants';
 
+// ─── Ball type ────────────────────────────────────────────────────────────────
+interface Ball {
+  pos: { x: number; y: number };
+  prevPos: { x: number; y: number };
+  vel: { dx: number; dy: number };
+  speed: number;
+  state: 'idle' | 'moving' | 'critical';
+}
+
+function createBall(x: number, y: number): Ball {
+  return {
+    pos: { x, y },
+    prevPos: { x, y },
+    vel: { dx: 0, dy: 0 },
+    speed: 0,
+    state: 'idle',
+  };
+}
+
+function launchBall(ball: Ball, angle?: number): void {
+  const a = angle ?? Math.random() * Math.PI * 2;
+  ball.vel = { dx: Math.cos(a) * LAUNCH_SPEED, dy: Math.sin(a) * LAUNCH_SPEED };
+  ball.speed = LAUNCH_SPEED;
+  ball.state = 'moving';
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function CanvasScene() {
   // Canvas refs
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const crackCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // UI state (triggers React re-renders only when these actually change)
+  // UI state
   const [hasLaunched, setHasLaunched] = useState(false);
   const [showSilentOverlay, setShowSilentOverlay] = useState(false);
 
-  // Physics refs (never trigger re-renders — updated inside rAF loop)
-  const posRef = useRef({ x: 0, y: 0 });
-  const velRef = useRef({ dx: 0, dy: 0 });
-  const speedRef = useRef(0);
-  const stateRef = useRef<'idle' | 'moving' | 'critical'>('idle');
+  // Ball state (array to support multiple balls after shatter resets)
+  const ballsRef = useRef<Ball[]>([]);
+  const ballCountRef = useRef(1);
   const hasLaunchedRef = useRef(false);
 
   // Visual refs
@@ -41,12 +73,17 @@ export default function CanvasScene() {
   const fullBreakRef = useRef(false);
   const shakeRef = useRef({ x: 0, y: 0, endTime: 0 });
 
+  // Shatter sequence
+  const shatterPhaseRef = useRef<'none' | 'shattering'>('none');
+  const shatterStartRef = useRef(0);
+
   // Silence detection refs
   const silenceStartRef = useRef<number | null>(null);
   const silentOverlayActiveRef = useRef(false);
 
   // Throttle refs
   const lastCrashTimeRef = useRef(0);
+  const lastInteriorCrackTimeRef = useRef(0);
   const rafRef = useRef<number>(0);
 
   const { volumeRef, error } = useMicVolume();
@@ -65,37 +102,61 @@ export default function CanvasScene() {
     crack.width = w;
     crack.height = h;
 
-    // Re-centre ball only when it hasn't launched yet
+    // Initialise first ball when nothing has launched yet
     if (!hasLaunchedRef.current) {
-      posRef.current = { x: w / 2, y: h / 2 };
+      if (ballsRef.current.length === 0) {
+        ballsRef.current = [createBall(w / 2, h / 2)];
+      } else {
+        // Keep ball centred while idle on resize
+        ballsRef.current.forEach((b) => {
+          b.pos = { x: w / 2, y: h / 2 };
+          b.prevPos = { x: w / 2, y: h / 2 };
+        });
+      }
     }
   }, []);
 
-  // ─── Launch on click ─────────────────────────────────────────────────────────
+  // ─── Click handler ───────────────────────────────────────────────────────────
   const handleClick = useCallback(() => {
-    if (stateRef.current !== 'idle') return;
-
     const engine = soundEngineRef.current;
-    if (engine) {
-      engine.start().then(() => {
-        engine.playLaunch();
+
+    if (!hasLaunchedRef.current) {
+      // First launch: start audio context and fire
+      if (engine) {
+        engine.start().then(() => engine.playLaunch());
+      }
+
+      const w = mainCanvasRef.current?.width ?? window.innerWidth;
+      const h = mainCanvasRef.current?.height ?? window.innerHeight;
+      if (ballsRef.current.length === 0) {
+        ballsRef.current = [createBall(w / 2, h / 2)];
+      }
+
+      ballsRef.current.forEach((ball, i) => {
+        const angle = (Math.PI * 2 * i) / ballsRef.current.length + Math.random() * 0.3;
+        launchBall(ball, angle);
       });
+
+      hasLaunchedRef.current = true;
+      setHasLaunched(true);
+      silenceStartRef.current = null;
+      silentOverlayActiveRef.current = false;
+      setShowSilentOverlay(false);
+    } else {
+      // Re-launch any stopped balls on click (alternative to mic auto-relaunch)
+      let launched = false;
+      ballsRef.current.forEach((ball) => {
+        if (ball.state === 'idle') {
+          launchBall(ball);
+          launched = true;
+        }
+      });
+      if (launched) {
+        engine?.playLaunch();
+        silentOverlayActiveRef.current = false;
+        setShowSilentOverlay(false);
+      }
     }
-
-    const angle = Math.random() * Math.PI * 2;
-    velRef.current = {
-      dx: Math.cos(angle) * LAUNCH_SPEED,
-      dy: Math.sin(angle) * LAUNCH_SPEED,
-    };
-    speedRef.current = LAUNCH_SPEED;
-    stateRef.current = 'moving';
-    hasLaunchedRef.current = true;
-    setHasLaunched(true);
-
-    // Dismiss silence overlay on launch
-    silenceStartRef.current = null;
-    silentOverlayActiveRef.current = false;
-    setShowSilentOverlay(false);
   }, [soundEngineRef]);
 
   // ─── Animation loop ───────────────────────────────────────────────────────────
@@ -109,7 +170,6 @@ export default function CanvasScene() {
     const ctx = mainCanvas.getContext('2d')!;
     const crackCtx = crackCanvas.getContext('2d')!;
 
-    // Paint initial background
     ctx.fillStyle = '#050508';
     ctx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
 
@@ -119,76 +179,159 @@ export default function CanvasScene() {
       const volume = volumeRef.current;
       const now = Date.now();
 
-      // ── Physics ─────────────────────────────────────────────────────────────
-      if (stateRef.current !== 'idle') {
-        const spd = speedRef.current;
+      // ── Shatter sequence (early-exit branch) ──────────────────────────────────
+      if (shatterPhaseRef.current === 'shattering') {
+        const elapsed = now - shatterStartRef.current;
+        const progress = Math.min(1, elapsed / 2000);
 
-        // Audio acceleration: boost in current direction
-        if (volume > SILENCE_VOLUME_THRESHOLD && spd > 0) {
+        if (progress < 0.25) {
+          // Rapid white flash
+          const flashAlpha = Math.sin((progress / 0.25) * Math.PI);
+          ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha * 0.97})`;
+          ctx.fillRect(0, 0, w, h);
+        } else if (progress < 0.65) {
+          // Solid white — cracks visible through screen blend
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.97)';
+          ctx.fillRect(0, 0, w, h);
+        } else {
+          // Fade to black
+          const fade = (progress - 0.65) / 0.35;
+          ctx.fillStyle = `rgba(5, 5, 8, ${fade * 0.97})`;
+          ctx.fillRect(0, 0, w, h);
+        }
+
+        if (progress >= 1) {
+          // ── Reset and add one more ball ──────────────────────────────────────
+          shatterPhaseRef.current = 'none';
+          ballCountRef.current += 1;
+          const newCount = ballCountRef.current;
+
+          cracksRef.current = [];
+          crackCtx.clearRect(0, 0, w, h);
+          fullBreakRef.current = false;
+          flashRef.current = 0;
+
+          ballsRef.current = [];
+          for (let i = 0; i < newCount; i++) {
+            const ball = createBall(w / 2, h / 2);
+            const angle = (Math.PI * 2 * i) / newCount + (Math.random() - 0.5) * 0.4;
+            launchBall(ball, angle);
+            ballsRef.current.push(ball);
+          }
+
+          ctx.fillStyle = '#050508';
+          ctx.fillRect(0, 0, w, h);
+          silenceStartRef.current = null;
+        }
+
+        rafRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
+      // ── Physics ──────────────────────────────────────────────────────────────
+      let maxSpeed = 0;
+
+      for (const ball of ballsRef.current) {
+        // ── Auto-relaunch idle ball when mic detects volume ─────────────────
+        if (ball.state === 'idle') {
+          if (hasLaunchedRef.current && volume > SILENCE_VOLUME_THRESHOLD * AUTO_RELAUNCH_VOLUME_MULTIPLIER) {
+            launchBall(ball);
+            soundEngineRef.current?.playLaunch();
+            silentOverlayActiveRef.current = false;
+            setShowSilentOverlay(false);
+          }
+          continue;
+        }
+
+        // Save previous position for smooth trail rendering
+        ball.prevPos = { ...ball.pos };
+
+        // Audio acceleration in current direction
+        if (volume > SILENCE_VOLUME_THRESHOLD && ball.speed > 0) {
           const boost = volume * MAX_BOOST;
-          const invSpd = 1 / spd;
-          velRef.current.dx += velRef.current.dx * invSpd * boost;
-          velRef.current.dy += velRef.current.dy * invSpd * boost;
+          const invSpd = 1 / ball.speed;
+          ball.vel.dx += ball.vel.dx * invSpd * boost;
+          ball.vel.dy += ball.vel.dy * invSpd * boost;
         }
 
         // Friction decay
-        velRef.current.dx *= FRICTION;
-        velRef.current.dy *= FRICTION;
+        ball.vel.dx *= FRICTION;
+        ball.vel.dy *= FRICTION;
 
         // Recalculate speed and cap
-        let newSpeed = Math.sqrt(velRef.current.dx ** 2 + velRef.current.dy ** 2);
+        let newSpeed = Math.sqrt(ball.vel.dx ** 2 + ball.vel.dy ** 2);
         if (newSpeed > MAX_SPEED) {
           const scale = MAX_SPEED / newSpeed;
-          velRef.current.dx *= scale;
-          velRef.current.dy *= scale;
+          ball.vel.dx *= scale;
+          ball.vel.dy *= scale;
           newSpeed = MAX_SPEED;
         }
-        speedRef.current = newSpeed;
+        ball.speed = newSpeed;
 
         // Move
-        posRef.current.x += velRef.current.dx;
-        posRef.current.y += velRef.current.dy;
+        ball.pos.x += ball.vel.dx;
+        ball.pos.y += ball.vel.dy;
 
-        // ── Bounce detection ──────────────────────────────────────────────────
+        // ── Bounce detection ────────────────────────────────────────────────
         let bounced = false;
-        let bounceX = posRef.current.x;
-        let bounceY = posRef.current.y;
+        let bounceX = ball.pos.x;
+        let bounceY = ball.pos.y;
 
-        if (posRef.current.x - BALL_RADIUS <= 0) {
-          posRef.current.x = BALL_RADIUS;
-          velRef.current.dx = Math.abs(velRef.current.dx);
+        if (ball.pos.x - BALL_RADIUS <= 0) {
+          ball.pos.x = BALL_RADIUS;
+          ball.vel.dx = Math.abs(ball.vel.dx);
           bounceX = 0;
           bounced = true;
-        } else if (posRef.current.x + BALL_RADIUS >= w) {
-          posRef.current.x = w - BALL_RADIUS;
-          velRef.current.dx = -Math.abs(velRef.current.dx);
+        } else if (ball.pos.x + BALL_RADIUS >= w) {
+          ball.pos.x = w - BALL_RADIUS;
+          ball.vel.dx = -Math.abs(ball.vel.dx);
           bounceX = w;
           bounced = true;
         }
 
-        if (posRef.current.y - BALL_RADIUS <= 0) {
-          posRef.current.y = BALL_RADIUS;
-          velRef.current.dy = Math.abs(velRef.current.dy);
+        if (ball.pos.y - BALL_RADIUS <= 0) {
+          ball.pos.y = BALL_RADIUS;
+          ball.vel.dy = Math.abs(ball.vel.dy);
           bounceY = 0;
           bounced = true;
-        } else if (posRef.current.y + BALL_RADIUS >= h) {
-          posRef.current.y = h - BALL_RADIUS;
-          velRef.current.dy = -Math.abs(velRef.current.dy);
+        } else if (ball.pos.y + BALL_RADIUS >= h) {
+          ball.pos.y = h - BALL_RADIUS;
+          ball.vel.dy = -Math.abs(ball.vel.dy);
           bounceY = h;
           bounced = true;
         }
 
         if (bounced) {
-          soundEngineRef.current?.playBounce(speedRef.current);
+          // Small random angle jitter so the ball doesn't loop on the same path
+          if (ball.speed > 0) {
+            const jitter = (Math.random() - 0.5) * BOUNCE_ANGLE_JITTER * 2;
+            const cos = Math.cos(jitter);
+            const sin = Math.sin(jitter);
+            const newDx = ball.vel.dx * cos - ball.vel.dy * sin;
+            const newDy = ball.vel.dx * sin + ball.vel.dy * cos;
+            ball.vel.dx = newDx;
+            ball.vel.dy = newDy;
+          }
 
-          if (speedRef.current > CRITICAL_THRESHOLD) {
-            stateRef.current = 'critical';
+          soundEngineRef.current?.playBounce(ball.speed);
 
-            // Spawn crack on persistent layer
+          if (ball.speed > CRITICAL_THRESHOLD) {
+            ball.state = 'critical';
+
             if (!fullBreakRef.current) {
-              const crack = generateCrack(bounceX, bounceY, w, h);
-              cracksRef.current.push(crack);
-              drawCracks(crackCtx, [crack], speedRef.current);
+              // Edge crack at impact point
+              const edgeCrack = generateCrack(bounceX, bounceY, w, h, 'edge');
+              cracksRef.current.push(edgeCrack);
+              drawCracks(crackCtx, [edgeCrack], ball.speed);
+
+              // 50% chance of a simultaneous interior crack
+              if (Math.random() < 0.5) {
+                const ix = BALL_RADIUS * 3 + Math.random() * (w - BALL_RADIUS * 6);
+                const iy = BALL_RADIUS * 3 + Math.random() * (h - BALL_RADIUS * 6);
+                const intCrack = generateCrack(ix, iy, w, h, 'interior');
+                cracksRef.current.push(intCrack);
+                drawCracks(crackCtx, [intCrack], ball.speed);
+              }
             }
 
             // Screen shake
@@ -198,92 +341,140 @@ export default function CanvasScene() {
               endTime: now + 130,
             };
 
-            // Crash sound (throttled to avoid overlapping)
+            // Crash sound (throttled)
             if (now - lastCrashTimeRef.current > 1500) {
               soundEngineRef.current?.playCrash();
               lastCrashTimeRef.current = now;
             }
 
-            // Full-break trigger
-            if (!fullBreakRef.current && cracksRef.current.length >= MAX_CRACKS) {
+            // Check edge-crack count for shatter trigger
+            const edgeCount = cracksRef.current.filter((c) => c.type === 'edge').length;
+            if (!fullBreakRef.current && edgeCount >= MAX_CRACKS) {
               fullBreakRef.current = true;
               flashRef.current = 6;
-              soundEngineRef.current?.playCrash();
+              shatterPhaseRef.current = 'shattering';
+              shatterStartRef.current = now;
+              soundEngineRef.current?.playShatter();
             }
           } else {
-            stateRef.current = 'moving';
+            ball.state = 'moving';
           }
         }
 
-        // Update continuous hum
-        soundEngineRef.current?.updateHum(speedRef.current);
-
         // Ball stopped
-        if (speedRef.current < STOP_THRESHOLD) {
-          stateRef.current = 'idle';
-          velRef.current = { dx: 0, dy: 0 };
-          speedRef.current = 0;
-          soundEngineRef.current?.updateHum(0);
+        if (ball.speed < STOP_THRESHOLD) {
+          ball.state = 'idle';
+          ball.vel = { dx: 0, dy: 0 };
+          ball.speed = 0;
         }
 
-        // ── Silence detection ─────────────────────────────────────────────────
-        if (hasLaunchedRef.current) {
-          const isSilentNow =
-            volume < SILENCE_VOLUME_THRESHOLD && speedRef.current < MIN_SPEED;
+        maxSpeed = Math.max(maxSpeed, ball.speed);
+      }
 
-          if (isSilentNow) {
-            if (silenceStartRef.current === null) {
-              silenceStartRef.current = now;
-            } else if (now - silenceStartRef.current > SILENCE_TIMEOUT) {
-              if (!silentOverlayActiveRef.current) {
-                silentOverlayActiveRef.current = true;
-                setShowSilentOverlay(true);
-              }
+      // Update hum with the fastest ball's speed
+      soundEngineRef.current?.updateHum(maxSpeed);
+
+      // ── Periodic interior cracks (gradual spread across screen) ─────────────
+      const edgeCount = cracksRef.current.filter((c) => c.type === 'edge').length;
+      if (
+        hasLaunchedRef.current &&
+        !fullBreakRef.current &&
+        edgeCount >= Math.floor(MAX_CRACKS * INTERIOR_CRACK_START_FRACTION) &&
+        maxSpeed > 0
+      ) {
+        // Interval shrinks as more cracks accumulate (3s → 0.8s)
+        const ratio = edgeCount / MAX_CRACKS;
+        const interval = INTERIOR_CRACK_MAX_INTERVAL - ratio * INTERIOR_CRACK_INTERVAL_RANGE;
+        if (now - lastInteriorCrackTimeRef.current > interval) {
+          const ix = BALL_RADIUS * 3 + Math.random() * (w - BALL_RADIUS * 6);
+          const iy = BALL_RADIUS * 3 + Math.random() * (h - BALL_RADIUS * 6);
+          const intCrack = generateCrack(ix, iy, w, h, 'interior');
+          cracksRef.current.push(intCrack);
+          drawCracks(crackCtx, [intCrack], CRITICAL_THRESHOLD);
+          lastInteriorCrackTimeRef.current = now;
+        }
+      }
+
+      // ── Silence detection ────────────────────────────────────────────────────
+      if (hasLaunchedRef.current) {
+        const allIdle = ballsRef.current.every((b) => b.state === 'idle');
+        const isSilentNow = volume < SILENCE_VOLUME_THRESHOLD && allIdle;
+
+        if (isSilentNow) {
+          if (silenceStartRef.current === null) {
+            silenceStartRef.current = now;
+          } else if (now - silenceStartRef.current > SILENCE_TIMEOUT) {
+            if (!silentOverlayActiveRef.current) {
+              silentOverlayActiveRef.current = true;
+              setShowSilentOverlay(true);
             }
-          } else {
-            silenceStartRef.current = null;
-            if (silentOverlayActiveRef.current) {
-              silentOverlayActiveRef.current = false;
-              setShowSilentOverlay(false);
-            }
+          }
+        } else {
+          silenceStartRef.current = null;
+          if (silentOverlayActiveRef.current) {
+            silentOverlayActiveRef.current = false;
+            setShowSilentOverlay(false);
           }
         }
       }
 
-      // ── Draw ──────────────────────────────────────────────────────────────────
-      const t = Math.min(1, speedRef.current / MAX_SPEED);
+      // ── Draw ─────────────────────────────────────────────────────────────────
+      const t = Math.min(1, maxSpeed / MAX_SPEED);
 
-      // Ghost-clear: opacity maps speed → trail length
-      const trailAlpha = 0.35 - t * 0.31; // 0.35 (short) → 0.04 (long)
+      // Ghost-clear: lower alpha = longer trail at high speed
+      const trailAlpha = 0.35 - t * 0.31;
       ctx.fillStyle = `rgba(5, 5, 8, ${trailAlpha})`;
       ctx.fillRect(0, 0, w, h);
 
-      // White flash on full-break
+      // White flash on critical impact
       if (flashRef.current > 0) {
         ctx.fillStyle = `rgba(255, 255, 255, ${(flashRef.current / 6) * 0.9})`;
         ctx.fillRect(0, 0, w, h);
         flashRef.current = Math.max(0, flashRef.current - 1);
       }
 
-      // Apply screen shake via context translation
       const shaking = now < shakeRef.current.endTime;
       if (shaking) {
         ctx.save();
         ctx.translate(shakeRef.current.x, shakeRef.current.y);
       }
 
-      // Draw ball with glow
-      const glowSize = 10 + t * 52;
-      const glowColor =
-        t > 0.6 ? 'rgba(255, 120, 50, 0.9)' : 'rgba(200, 225, 255, 0.9)';
+      // Draw each ball
+      for (const ball of ballsRef.current) {
+        const bt = Math.min(1, ball.speed / MAX_SPEED);
+        const glowSize = 10 + bt * 52;
+        const glowColor =
+          bt > 0.6 ? 'rgba(255, 120, 50, 0.9)' : 'rgba(200, 225, 255, 0.9)';
 
-      ctx.shadowBlur = glowSize;
-      ctx.shadowColor = glowColor;
-      ctx.beginPath();
-      ctx.arc(posRef.current.x, posRef.current.y, BALL_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(200, 200, 210, 1)';
-      ctx.fill();
-      ctx.shadowBlur = 0;
+        // ── Smooth motion trail ───────────────────────────────────────────────
+        if (ball.state !== 'idle' && ball.speed > MIN_SPEED) {
+          const dx = ball.pos.x - ball.prevPos.x;
+          const dy = ball.pos.y - ball.prevPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const steps = Math.min(Math.ceil(dist / TRAIL_STEP_PX), TRAIL_MAX_STEPS);
+
+          for (let i = 1; i < steps; i++) {
+            const f = i / steps;
+            const tx = ball.prevPos.x + dx * f;
+            const ty = ball.prevPos.y + dy * f;
+            const alpha = f * 0.28 * bt;
+            const radius = BALL_RADIUS * (0.35 + f * 0.65);
+            ctx.beginPath();
+            ctx.arc(tx, ty, radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(200, 200, 210, ${alpha})`;
+            ctx.fill();
+          }
+        }
+
+        // Draw ball with glow
+        ctx.shadowBlur = glowSize;
+        ctx.shadowColor = glowColor;
+        ctx.beginPath();
+        ctx.arc(ball.pos.x, ball.pos.y, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(200, 200, 210, 1)';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
 
       if (shaking) {
         ctx.restore();
@@ -294,7 +485,6 @@ export default function CanvasScene() {
 
     rafRef.current = requestAnimationFrame(animate);
 
-    // Resize handling
     const handleResize = () => resizeCanvases();
     window.addEventListener('resize', handleResize);
     const ro = new ResizeObserver(handleResize);

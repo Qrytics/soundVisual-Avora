@@ -10,6 +10,8 @@ export interface Crack {
   segments: CrackSegment[];
   originX: number;
   originY: number;
+  /** 'edge' cracks originate from wall impacts; 'interior' cracks spread across the screen */
+  type: 'edge' | 'interior';
 }
 
 /**
@@ -20,7 +22,8 @@ export function generateCrack(
   originX: number,
   originY: number,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  type: 'edge' | 'interior' = 'edge'
 ): Crack {
   const segments: CrackSegment[] = [];
   const numBranches = Math.floor(Math.random() * 3) + 3; // 3-5 main branches
@@ -40,7 +43,7 @@ export function generateCrack(
     );
   }
 
-  return { segments, originX, originY };
+  return { segments, originX, originY, type };
 }
 
 function generateBranch(

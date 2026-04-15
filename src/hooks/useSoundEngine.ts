@@ -10,6 +10,8 @@ export interface SoundEngine {
   playBounce: (speed: number) => void;
   updateHum: (speed: number) => void;
   playCrash: () => void;
+  /** Dramatic full-screen shattering sound. */
+  playShatter: () => void;
 }
 
 /**
@@ -61,6 +63,26 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
       }).toDestination();
       crashTone.volume.value = -12;
 
+      // --- Shatter: dramatic multi-layer glass break ---
+      const shatterNoise = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.001, decay: 1.8, sustain: 0.05, release: 1.2 },
+      }).toDestination();
+      shatterNoise.volume.value = 2;
+
+      const shatterHighFilter = new Tone.Filter({ frequency: 6000, type: 'highpass' }).toDestination();
+      const shatterHigh = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
+      }).connect(shatterHighFilter);
+      shatterHigh.volume.value = -4;
+
+      const shatterSub = new Tone.Synth({
+        oscillator: { type: 'sawtooth' },
+        envelope: { attack: 0.005, decay: 1.2, sustain: 0, release: 1.5 },
+      }).toDestination();
+      shatterSub.volume.value = -8;
+
       const engine: SoundEngine = {
         start: async () => {
           if (startedRef.current) return;
@@ -96,6 +118,19 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
           crashTone.triggerAttackRelease('A1', '4n');
           // Pitch sweep downward for dramatic effect
           crashTone.frequency.rampTo(30, 1.0);
+        },
+
+        playShatter: () => {
+          if (!startedRef.current) return;
+          // Main noise burst
+          shatterNoise.triggerAttackRelease('4n');
+          // High-frequency glass shimmer
+          shatterHigh.triggerAttackRelease('16n');
+          // Deep sub rumble sweeping down
+          shatterSub.triggerAttackRelease('A0', '2n');
+          shatterSub.frequency.rampTo(20, 2.0);
+          // Additional crash layer for extra impact
+          crashNoise.triggerAttackRelease('4n');
         },
       };
 
