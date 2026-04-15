@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050508;
+}
+
+/* ── Silence mic-pulse animation ─────────────────────────────────────────── */
+@keyframes mic-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(200, 200, 255, 0.4));
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.18);
+    filter: drop-shadow(0 0 24px rgba(160, 180, 255, 0.9));
+    opacity: 1;
+  }
+}
+
+.mic-pulse {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
