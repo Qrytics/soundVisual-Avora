@@ -1,8 +1,7 @@
-import dynamic from 'next/dynamic';
+import CanvasScene from '@/components/CanvasScene';
 
-// CanvasScene uses browser APIs — load client-side only
-const CanvasScene = dynamic(() => import('@/components/CanvasScene'), { ssr: false });
-
+// CanvasScene is a Client Component ('use client') that accesses browser APIs
+// only inside useEffect — safe to import directly in a Server Component page.
 export default function Home() {
   return <CanvasScene />;
 }
