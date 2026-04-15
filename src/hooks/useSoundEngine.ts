@@ -52,7 +52,7 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
             // Ignore this single trigger instead of crashing the animation/runtime.
             return;
           }
-          throw err;
+          console.warn('Non-fatal Tone scheduling error:', err);
         }
       };
       const getMonotonicStartTime = (voiceKey: string, requestedStartTime = Tone.now()): number => {
@@ -250,7 +250,9 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
       engineRef.current = engine;
     };
 
-    init();
+    init().catch((err) => {
+      console.warn('Failed to initialize sound engine:', err);
+    });
 
     return () => {
       cancelled = true;

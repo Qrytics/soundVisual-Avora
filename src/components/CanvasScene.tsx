@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic } from 'lucide-react';
+import { Mic, RotateCcw } from 'lucide-react';
 import { useMicVolume } from '@/hooks/useMicVolume';
 import { useSoundEngine } from '@/hooks/useSoundEngine';
 import { generateCrack, drawCracks, Crack } from '@/lib/crackRenderer';
@@ -102,6 +102,12 @@ function isStrictStartTimeError(err: unknown): boolean {
   return String(err).includes('Start time must be strictly greater than previous start time');
 }
 
+function describeUnknownError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return String(err);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CanvasScene() {
   // Canvas refs
@@ -145,10 +151,48 @@ export default function CanvasScene() {
       play();
     } catch (err) {
       if (!isStrictStartTimeError(err)) {
-        throw err;
+        console.warn('Non-fatal audio playback error:', describeUnknownError(err));
       }
     }
   }, []);
+
+  const resetExperience = useCallback(() => {
+    const w = mainCanvasRef.current?.width ?? window.innerWidth;
+    const h = mainCanvasRef.current?.height ?? window.innerHeight;
+
+    // Reset simulation to initial state with a single centered ball.
+    ballsRef.current = [createBall(w / 2, h / 2)];
+    ballCountRef.current = 1;
+    hasLaunchedRef.current = false;
+    setHasLaunched(false);
+
+    // Clear all visual/shatter state.
+    cracksRef.current = [];
+    flashRef.current = 0;
+    fullBreakRef.current = false;
+    shatterPhaseRef.current = 'none';
+    shatterStartRef.current = 0;
+    shakeRef.current = { x: 0, y: 0, endTime: 0 };
+    lastInteriorCrackTimeRef.current = 0;
+    lastCrashTimeRef.current = 0;
+
+    // Reset silence overlay.
+    silenceStartRef.current = null;
+    silentOverlayActiveRef.current = false;
+    setShowSilentOverlay(false);
+
+    // Clear crack canvas immediately.
+    const crack = crackCanvasRef.current;
+    const crackCtx = crack?.getContext('2d');
+    if (crack && crackCtx) {
+      crackCtx.clearRect(0, 0, crack.width, crack.height);
+    }
+
+    // Fade hum out immediately after reset.
+    safeSound(() => {
+      soundEngineRef.current?.updateHum(0);
+    });
+  }, [safeSound, soundEngineRef]);
 
   // ─── Canvas resize ───────────────────────────────────────────────────────────
   const resizeCanvases = useCallback(() => {
@@ -184,10 +228,15 @@ export default function CanvasScene() {
     if (!hasLaunchedRef.current) {
       // First launch: start audio context and fire
       if (engine) {
-          engine.start().then(() => {
+        engine
+          .start()
+          .then(() => {
             safeSound(() => {
               engine.playLaunch();
             });
+          })
+          .catch((err) => {
+            console.warn('Audio engine failed to start:', describeUnknownError(err));
           });
       }
 
@@ -198,7 +247,10 @@ export default function CanvasScene() {
       }
 
       ballsRef.current.forEach((ball, i) => {
-        const angle = (Math.PI * 2 * i) / ballsRef.current.length + Math.random() * 0.3;
+        const angle =
+          ballsRef.current.length === 1
+            ? Math.random() * Math.PI * 2
+            : (Math.PI * 2 * i) / ballsRef.current.length + Math.random() * 0.3;
         launchBall(ball, angle);
       });
 
@@ -748,6 +800,16 @@ export default function CanvasScene() {
           </p>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={resetExperience}
+        aria-label="Restart experience"
+        title="Restart"
+        className="absolute bottom-4 right-4 z-20 h-12 w-12 rounded-full border border-white/30 bg-black/45 text-white/90 backdrop-blur-sm flex items-center justify-center hover:bg-black/65 transition-colors"
+      >
+        <RotateCcw size={18} />
+      </button>
     </div>
   );
 }
