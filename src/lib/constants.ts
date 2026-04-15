@@ -3,6 +3,7 @@ export const FRICTION = 0.992;
 export const MAX_BOOST = 0.8;
 export const MAX_SPEED = 40;
 export const MIN_SPEED = 0.5;
+export const STOP_THRESHOLD = 0.1;
 export const LAUNCH_SPEED = 8;
 export const BALL_RADIUS = 18;
 

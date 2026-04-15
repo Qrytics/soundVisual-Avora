@@ -10,6 +10,7 @@ import {
   MAX_BOOST,
   MAX_SPEED,
   MIN_SPEED,
+  STOP_THRESHOLD,
   CRITICAL_THRESHOLD,
   BALL_RADIUS,
   SILENCE_TIMEOUT,
@@ -218,7 +219,7 @@ export default function CanvasScene() {
         soundEngineRef.current?.updateHum(speedRef.current);
 
         // Ball stopped
-        if (speedRef.current < 0.1) {
+        if (speedRef.current < STOP_THRESHOLD) {
           stateRef.current = 'idle';
           velRef.current = { dx: 0, dy: 0 };
           speedRef.current = 0;

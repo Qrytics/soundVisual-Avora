@@ -118,7 +118,7 @@ Once secrets are configured, every push to `main` triggers a production deployme
 | `MAX_SPEED` | `40 px/frame` | Ball speed cap |
 | `CRITICAL_THRESHOLD` | `25 px/frame` | Speed at which cracks start appearing |
 | `BALL_RADIUS` | `18 px` | Ball size |
-| `SILENCE_TIMEOUT` | `1 500 ms` | Delay before mic icon appears |
+| `SILENCE_TIMEOUT` | `1,500 ms` | Delay before mic icon appears |
 
 ---
 
