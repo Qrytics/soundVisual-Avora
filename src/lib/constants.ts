@@ -10,9 +10,6 @@ export const BOUNCE_ANGLE_JITTER = 0.25; // radians, adds variability so ball do
 export const BALL_COLLISION_RESTITUTION = 1;
 export const COLLISION_EPSILON = 0.0001;
 
-// Deployment
-export const GAMES_DEPLOYMENT_BASE_PATH = '/games/soundVisual-Avora';
-
 // Crack system
 export const CRITICAL_THRESHOLD = 22;
 export const MAX_CRACKS = 20; // edge cracks before full shatter

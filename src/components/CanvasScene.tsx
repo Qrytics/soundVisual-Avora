@@ -25,7 +25,6 @@ import {
   TRAIL_STEP_PX,
   TRAIL_MAX_STEPS,
   BALL_COLLISION_SOUND_THROTTLE_MS,
-  GAMES_DEPLOYMENT_BASE_PATH,
   BALL_COLLISION_RESTITUTION,
   COLLISION_EPSILON,
 } from '@/lib/constants';
@@ -85,7 +84,7 @@ export default function CanvasScene() {
   // UI state
   const [hasLaunched, setHasLaunched] = useState(false);
   const [showSilentOverlay, setShowSilentOverlay] = useState(false);
-  const showBackToGames = process.env.NEXT_PUBLIC_BASE_PATH === GAMES_DEPLOYMENT_BASE_PATH;
+  const showBackToGames = Boolean(process.env.NEXT_PUBLIC_BASE_PATH);
 
   // Ball state (array to support multiple balls after shatter resets)
   const ballsRef = useRef<Ball[]>([]);
