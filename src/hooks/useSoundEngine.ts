@@ -8,6 +8,7 @@ export interface SoundEngine {
   start: () => Promise<void>;
   playLaunch: () => void;
   playBounce: (speed: number) => void;
+  playBallCollision: (speed: number) => void;
   updateHum: (speed: number) => void;
   playCrash: () => void;
   /** Dramatic full-screen shattering sound. */
@@ -44,6 +45,19 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
         envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.06 },
       }).toDestination();
       bounceSynth.volume.value = -16;
+
+      // --- Ball collision click: short mechanical-style tick ---
+      const collisionBodySynth = new Tone.Synth({
+        oscillator: { type: 'square' },
+        envelope: { attack: 0.0005, decay: 0.02, sustain: 0, release: 0.015 },
+      }).toDestination();
+      collisionBodySynth.volume.value = -12;
+
+      const collisionSnapSynth = new Tone.Synth({
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.0005, decay: 0.01, sustain: 0, release: 0.01 },
+      }).toDestination();
+      collisionSnapSynth.volume.value = -18;
 
       // --- Velocity hum: continuous oscillator gated by gain ---
       const humGain = new Tone.Gain(0).toDestination();
@@ -101,6 +115,16 @@ export function useSoundEngine(): React.MutableRefObject<SoundEngine | null> {
           const t = Math.min(1, speed / MAX_SPEED);
           const freq = 180 + t * 620; // 180 Hz slow → 800 Hz fast
           bounceSynth.triggerAttackRelease(freq, '32n');
+        },
+
+        playBallCollision: (speed: number) => {
+          if (!startedRef.current) return;
+          const t = Math.min(1, speed / MAX_SPEED);
+          const bodyFreq = 900 + t * 700;
+          const snapFreq = 2200 + t * 1200;
+          const now = Tone.now();
+          collisionBodySynth.triggerAttackRelease(bodyFreq, '128n', now);
+          collisionSnapSynth.triggerAttackRelease(snapFreq, '256n', now + 0.008);
         },
 
         updateHum: (speed: number) => {
