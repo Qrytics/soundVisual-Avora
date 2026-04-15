@@ -346,13 +346,6 @@ export default function CanvasScene() {
             ball.vel.dy = -Math.abs(ball.vel.dy);
           }
 
-          if (!Number.isFinite(ball.vel.dx) || !Number.isFinite(ball.vel.dy)) {
-            ball.vel = { dx: 0, dy: 0 };
-            ball.speed = 0;
-            ball.state = 'idle';
-            continue;
-          }
-
           soundEngineRef.current?.playBounce(ball.speed);
 
           if (ball.speed > CRITICAL_THRESHOLD) {
