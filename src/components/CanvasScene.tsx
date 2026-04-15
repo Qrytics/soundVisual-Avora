@@ -52,6 +52,25 @@ function launchBall(ball: Ball, angle?: number): void {
   ball.state = 'moving';
 }
 
+function applySpeedAndState(ball: Ball): void {
+  let speed = Math.sqrt(ball.vel.dx ** 2 + ball.vel.dy ** 2);
+  if (speed > MAX_SPEED) {
+    const scale = MAX_SPEED / speed;
+    ball.vel.dx *= scale;
+    ball.vel.dy *= scale;
+    speed = MAX_SPEED;
+  }
+  ball.speed = speed;
+
+  if (speed < STOP_THRESHOLD) {
+    ball.state = 'idle';
+    ball.vel = { dx: 0, dy: 0 };
+    ball.speed = 0;
+  } else if (ball.state === 'idle') {
+    ball.state = 'moving';
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CanvasScene() {
   // Canvas refs
@@ -61,6 +80,7 @@ export default function CanvasScene() {
   // UI state
   const [hasLaunched, setHasLaunched] = useState(false);
   const [showSilentOverlay, setShowSilentOverlay] = useState(false);
+  const showBackToGames = process.env.NEXT_PUBLIC_BASE_PATH === '/games/soundVisual-Avora';
 
   // Ball state (array to support multiple balls after shatter resets)
   const ballsRef = useRef<Ball[]>([]);
@@ -83,6 +103,7 @@ export default function CanvasScene() {
 
   // Throttle refs
   const lastCrashTimeRef = useRef(0);
+  const lastBallCollisionSoundTimeRef = useRef(0);
   const lastInteriorCrackTimeRef = useRef(0);
   const rafRef = useRef<number>(0);
 
@@ -404,6 +425,76 @@ export default function CanvasScene() {
         maxSpeed = Math.max(maxSpeed, ball.speed);
       }
 
+      // ── Ball-to-ball collisions ──────────────────────────────────────────────
+      let maxCollisionImpact = 0;
+      for (let i = 0; i < ballsRef.current.length; i++) {
+        for (let j = i + 1; j < ballsRef.current.length; j++) {
+          const a = ballsRef.current[i];
+          const b = ballsRef.current[j];
+          const minDist = BALL_RADIUS * 2;
+          const dx = b.pos.x - a.pos.x;
+          const dy = b.pos.y - a.pos.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq >= minDist * minDist) continue;
+
+          let nx = 0;
+          let ny = 0;
+          let dist = Math.sqrt(distSq);
+          if (dist > 0.0001) {
+            nx = dx / dist;
+            ny = dy / dist;
+          } else {
+            const rvx = b.vel.dx - a.vel.dx;
+            const rvy = b.vel.dy - a.vel.dy;
+            const rvMag = Math.sqrt(rvx * rvx + rvy * rvy);
+            if (rvMag > 0.0001) {
+              nx = rvx / rvMag;
+              ny = rvy / rvMag;
+            } else {
+              const angle = Math.random() * Math.PI * 2;
+              nx = Math.cos(angle);
+              ny = Math.sin(angle);
+            }
+            dist = 0;
+          }
+
+          const overlap = minDist - dist;
+          if (overlap > 0) {
+            const half = overlap * 0.5;
+            a.pos.x -= nx * half;
+            a.pos.y -= ny * half;
+            b.pos.x += nx * half;
+            b.pos.y += ny * half;
+          }
+
+          const rvx = b.vel.dx - a.vel.dx;
+          const rvy = b.vel.dy - a.vel.dy;
+          const velAlongNormal = rvx * nx + rvy * ny;
+          if (velAlongNormal < 0) {
+            const impulse = -velAlongNormal; // equal-mass elastic collision
+            const ix = impulse * nx;
+            const iy = impulse * ny;
+            a.vel.dx -= ix;
+            a.vel.dy -= iy;
+            b.vel.dx += ix;
+            b.vel.dy += iy;
+            maxCollisionImpact = Math.max(maxCollisionImpact, impulse);
+            applySpeedAndState(a);
+            applySpeedAndState(b);
+          }
+        }
+      }
+
+      if (maxCollisionImpact > 0 && now - lastBallCollisionSoundTimeRef.current > 40) {
+        soundEngineRef.current?.playBallCollision(maxCollisionImpact);
+        lastBallCollisionSoundTimeRef.current = now;
+      }
+
+      maxSpeed = 0;
+      for (const ball of ballsRef.current) {
+        maxSpeed = Math.max(maxSpeed, ball.speed);
+      }
+
       // Update hum with the fastest ball's speed
       soundEngineRef.current?.updateHum(maxSpeed);
 
@@ -547,6 +638,15 @@ export default function CanvasScene() {
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#050508]">
+      {showBackToGames && (
+        <a
+          href="https://mario-belmonte.com/games"
+          className="absolute top-4 left-4 z-20 px-3 py-1.5 border border-white/25 text-white/90 text-xs tracking-wide uppercase bg-black/35 hover:bg-black/55 transition-colors"
+        >
+          Back to Games
+        </a>
+      )}
+
       {/* Main drawing canvas */}
       <canvas
         ref={mainCanvasRef}
