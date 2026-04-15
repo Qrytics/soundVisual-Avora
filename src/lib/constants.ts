@@ -7,6 +7,10 @@ export const STOP_THRESHOLD = 0.1;
 export const LAUNCH_SPEED = 8;
 export const BALL_RADIUS = 18;
 export const BOUNCE_ANGLE_JITTER = 0.25; // radians, adds variability so ball doesn't loop forever
+export const BALL_COLLISION_RESTITUTION = 1;
+
+// Deployment
+export const GAMES_DEPLOYMENT_BASE_PATH = '/games/soundVisual-Avora';
 
 // Crack system
 export const CRITICAL_THRESHOLD = 22;

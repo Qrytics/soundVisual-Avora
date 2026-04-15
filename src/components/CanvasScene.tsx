@@ -25,6 +25,8 @@ import {
   TRAIL_STEP_PX,
   TRAIL_MAX_STEPS,
   BALL_COLLISION_SOUND_THROTTLE_MS,
+  GAMES_DEPLOYMENT_BASE_PATH,
+  BALL_COLLISION_RESTITUTION,
 } from '@/lib/constants';
 
 // ─── Ball type ────────────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ export default function CanvasScene() {
   // UI state
   const [hasLaunched, setHasLaunched] = useState(false);
   const [showSilentOverlay, setShowSilentOverlay] = useState(false);
-  const showBackToGames = process.env.NEXT_PUBLIC_BASE_PATH === '/games/soundVisual-Avora';
+  const showBackToGames = process.env.NEXT_PUBLIC_BASE_PATH === GAMES_DEPLOYMENT_BASE_PATH;
 
   // Ball state (array to support multiple balls after shatter resets)
   const ballsRef = useRef<Ball[]>([]);
@@ -473,7 +475,7 @@ export default function CanvasScene() {
           const rvy = b.vel.dy - a.vel.dy;
           const velAlongNormal = rvx * nx + rvy * ny;
           if (velAlongNormal < 0) {
-            const impulse = -velAlongNormal; // equal-mass, perfectly elastic (restitution = 1)
+            const impulse = -(1 + BALL_COLLISION_RESTITUTION) * velAlongNormal * 0.5;
             const ix = impulse * nx;
             const iy = impulse * ny;
             a.vel.dx -= ix;
