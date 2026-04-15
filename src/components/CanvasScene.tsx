@@ -471,7 +471,7 @@ export default function CanvasScene() {
           const rvy = b.vel.dy - a.vel.dy;
           const velAlongNormal = rvx * nx + rvy * ny;
           if (velAlongNormal < 0) {
-            const impulse = -velAlongNormal; // equal-mass elastic collision
+            const impulse = -velAlongNormal; // equal-mass, perfectly elastic (restitution = 1)
             const ix = impulse * nx;
             const iy = impulse * ny;
             a.vel.dx -= ix;
@@ -490,6 +490,7 @@ export default function CanvasScene() {
         lastBallCollisionSoundTimeRef.current = now;
       }
 
+      // Recompute from final post-collision velocities so hum reflects the actual frame result.
       maxSpeed = 0;
       for (const ball of ballsRef.current) {
         maxSpeed = Math.max(maxSpeed, ball.speed);
