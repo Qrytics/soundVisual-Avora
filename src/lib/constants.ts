@@ -9,6 +9,8 @@ export const BALL_RADIUS = 18;
 export const BOUNCE_ANGLE_JITTER = 0.25; // radians, adds variability so ball doesn't loop forever
 export const BALL_COLLISION_RESTITUTION = 1;
 export const COLLISION_EPSILON = 0.0001;
+/** Prevent unbounded O(n^2) pairwise collision growth after repeated shatters. */
+export const MAX_BALL_COUNT = 8;
 
 // Crack system
 export const CRITICAL_THRESHOLD = 22;

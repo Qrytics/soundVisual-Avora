@@ -27,6 +27,7 @@ import {
   BALL_COLLISION_SOUND_THROTTLE_MS,
   BALL_COLLISION_RESTITUTION,
   COLLISION_EPSILON,
+  MAX_BALL_COUNT,
 } from '@/lib/constants';
 
 // ─── Ball type ────────────────────────────────────────────────────────────────
@@ -75,6 +76,32 @@ function applySpeedAndState(ball: Ball): void {
   }
 }
 
+function clampBallInsideBounds(ball: Ball, width: number, height: number): void {
+  if (ball.pos.x - BALL_RADIUS < 0) {
+    ball.pos.x = BALL_RADIUS;
+    if (ball.vel.dx < 0) ball.vel.dx = Math.abs(ball.vel.dx);
+  } else if (ball.pos.x + BALL_RADIUS > width) {
+    ball.pos.x = width - BALL_RADIUS;
+    if (ball.vel.dx > 0) ball.vel.dx = -Math.abs(ball.vel.dx);
+  }
+
+  if (ball.pos.y - BALL_RADIUS < 0) {
+    ball.pos.y = BALL_RADIUS;
+    if (ball.vel.dy < 0) ball.vel.dy = Math.abs(ball.vel.dy);
+  } else if (ball.pos.y + BALL_RADIUS > height) {
+    ball.pos.y = height - BALL_RADIUS;
+    if (ball.vel.dy > 0) ball.vel.dy = -Math.abs(ball.vel.dy);
+  }
+}
+
+function isStrictStartTimeError(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof Error) {
+    return err.message.includes('Start time must be strictly greater than previous start time');
+  }
+  return String(err).includes('Start time must be strictly greater than previous start time');
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CanvasScene() {
   // Canvas refs
@@ -113,6 +140,15 @@ export default function CanvasScene() {
 
   const { volumeRef, error } = useMicVolume();
   const soundEngineRef = useSoundEngine();
+  const safeSound = useCallback((play: () => void) => {
+    try {
+      play();
+    } catch (err) {
+      if (!isStrictStartTimeError(err)) {
+        throw err;
+      }
+    }
+  }, []);
 
   // ─── Canvas resize ───────────────────────────────────────────────────────────
   const resizeCanvases = useCallback(() => {
@@ -148,7 +184,11 @@ export default function CanvasScene() {
     if (!hasLaunchedRef.current) {
       // First launch: start audio context and fire
       if (engine) {
-        engine.start().then(() => engine.playLaunch());
+          engine.start().then(() => {
+            safeSound(() => {
+              engine.playLaunch();
+            });
+          });
       }
 
       const w = mainCanvasRef.current?.width ?? window.innerWidth;
@@ -177,12 +217,14 @@ export default function CanvasScene() {
         }
       });
       if (launched) {
-        engine?.playLaunch();
+        safeSound(() => {
+          engine?.playLaunch();
+        });
         silentOverlayActiveRef.current = false;
         setShowSilentOverlay(false);
       }
     }
-  }, [soundEngineRef]);
+  }, [safeSound, soundEngineRef]);
 
   // ─── Animation loop ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -228,7 +270,7 @@ export default function CanvasScene() {
         if (progress >= 1) {
           // ── Reset and add one more ball ──────────────────────────────────────
           shatterPhaseRef.current = 'none';
-          ballCountRef.current += 1;
+          ballCountRef.current = Math.min(ballCountRef.current + 1, MAX_BALL_COUNT);
           const newCount = ballCountRef.current;
 
           cracksRef.current = [];
@@ -276,7 +318,9 @@ export default function CanvasScene() {
         if (ball.state === 'idle') {
           if (hasLaunchedRef.current && volume > SILENCE_VOLUME_THRESHOLD * AUTO_RELAUNCH_VOLUME_MULTIPLIER) {
             launchBall(ball);
-            soundEngineRef.current?.playLaunch();
+            safeSound(() => {
+              soundEngineRef.current?.playLaunch();
+            });
             silentOverlayActiveRef.current = false;
             setShowSilentOverlay(false);
           }
@@ -371,7 +415,9 @@ export default function CanvasScene() {
             ball.vel.dy = -Math.abs(ball.vel.dy);
           }
 
-          soundEngineRef.current?.playBounce(ball.speed);
+          safeSound(() => {
+            soundEngineRef.current?.playBounce(ball.speed);
+          });
 
           if (ball.speed > CRITICAL_THRESHOLD) {
             ball.state = 'critical';
@@ -401,7 +447,9 @@ export default function CanvasScene() {
 
             // Crash sound (throttled)
             if (now - lastCrashTimeRef.current > 1500) {
-              soundEngineRef.current?.playCrash();
+              safeSound(() => {
+                soundEngineRef.current?.playCrash();
+              });
               lastCrashTimeRef.current = now;
             }
 
@@ -412,7 +460,9 @@ export default function CanvasScene() {
               flashRef.current = 6;
               shatterPhaseRef.current = 'shattering';
               shatterStartRef.current = now;
-              soundEngineRef.current?.playShatter();
+              safeSound(() => {
+                soundEngineRef.current?.playShatter();
+              });
             }
           } else {
             ball.state = 'moving';
@@ -469,6 +519,9 @@ export default function CanvasScene() {
             a.pos.y -= ny * half;
             b.pos.x += nx * half;
             b.pos.y += ny * half;
+            // If separation pushes either ball outside bounds, snap it back immediately.
+            clampBallInsideBounds(a, w, h);
+            clampBallInsideBounds(b, w, h);
           }
 
           const rvx = b.vel.dx - a.vel.dx;
@@ -485,6 +538,8 @@ export default function CanvasScene() {
             maxCollisionImpact = Math.max(maxCollisionImpact, impulse);
             applySpeedAndState(a);
             applySpeedAndState(b);
+            clampBallInsideBounds(a, w, h);
+            clampBallInsideBounds(b, w, h);
           }
         }
       }
@@ -493,7 +548,9 @@ export default function CanvasScene() {
         maxCollisionImpact > 0 &&
         now - lastBallCollisionSoundTimeRef.current > BALL_COLLISION_SOUND_THROTTLE_MS
       ) {
-        soundEngineRef.current?.playBallCollision(maxCollisionImpact);
+        safeSound(() => {
+          soundEngineRef.current?.playBallCollision(maxCollisionImpact);
+        });
         lastBallCollisionSoundTimeRef.current = now;
       }
 
@@ -504,7 +561,9 @@ export default function CanvasScene() {
       }
 
       // Update hum with the fastest ball's speed
-      soundEngineRef.current?.updateHum(maxSpeed);
+      safeSound(() => {
+        soundEngineRef.current?.updateHum(maxSpeed);
+      });
 
       // ── Periodic interior cracks (gradual spread across screen) ─────────────
       const edgeCount = cracksRef.current.filter((c) => c.type === 'edge').length;
@@ -627,7 +686,7 @@ export default function CanvasScene() {
       window.removeEventListener('resize', handleResize);
       ro.disconnect();
     };
-  }, [volumeRef, soundEngineRef, resizeCanvases]);
+  }, [volumeRef, safeSound, soundEngineRef, resizeCanvases]);
 
   // ─── Render ───────────────────────────────────────────────────────────────────
   if (error) {
