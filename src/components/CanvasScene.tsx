@@ -232,6 +232,21 @@ export default function CanvasScene() {
       let maxSpeed = 0;
 
       for (const ball of ballsRef.current) {
+        if (
+          !Number.isFinite(ball.pos.x) ||
+          !Number.isFinite(ball.pos.y) ||
+          !Number.isFinite(ball.vel.dx) ||
+          !Number.isFinite(ball.vel.dy) ||
+          !Number.isFinite(ball.speed)
+        ) {
+          ball.pos = { x: w / 2, y: h / 2 };
+          ball.prevPos = { x: w / 2, y: h / 2 };
+          ball.vel = { dx: 0, dy: 0 };
+          ball.speed = 0;
+          ball.state = 'idle';
+          continue;
+        }
+
         // ── Auto-relaunch idle ball when mic detects volume ─────────────────
         if (ball.state === 'idle') {
           if (hasLaunchedRef.current && volume > SILENCE_VOLUME_THRESHOLD * AUTO_RELAUNCH_VOLUME_MULTIPLIER) {
@@ -274,17 +289,21 @@ export default function CanvasScene() {
 
         // ── Bounce detection ────────────────────────────────────────────────
         let bounced = false;
+        let hitX: -1 | 0 | 1 = 0;
+        let hitY: -1 | 0 | 1 = 0;
         let bounceX = ball.pos.x;
         let bounceY = ball.pos.y;
 
         if (ball.pos.x - BALL_RADIUS <= 0) {
           ball.pos.x = BALL_RADIUS;
           ball.vel.dx = Math.abs(ball.vel.dx);
+          hitX = -1;
           bounceX = 0;
           bounced = true;
         } else if (ball.pos.x + BALL_RADIUS >= w) {
           ball.pos.x = w - BALL_RADIUS;
           ball.vel.dx = -Math.abs(ball.vel.dx);
+          hitX = 1;
           bounceX = w;
           bounced = true;
         }
@@ -292,11 +311,13 @@ export default function CanvasScene() {
         if (ball.pos.y - BALL_RADIUS <= 0) {
           ball.pos.y = BALL_RADIUS;
           ball.vel.dy = Math.abs(ball.vel.dy);
+          hitY = -1;
           bounceY = 0;
           bounced = true;
         } else if (ball.pos.y + BALL_RADIUS >= h) {
           ball.pos.y = h - BALL_RADIUS;
           ball.vel.dy = -Math.abs(ball.vel.dy);
+          hitY = 1;
           bounceY = h;
           bounced = true;
         }
@@ -311,6 +332,25 @@ export default function CanvasScene() {
             const newDy = ball.vel.dx * sin + ball.vel.dy * cos;
             ball.vel.dx = newDx;
             ball.vel.dy = newDy;
+          }
+
+          // Keep post-jitter velocity pointed away from any wall hit this frame.
+          if (hitX === -1) {
+            ball.vel.dx = Math.abs(ball.vel.dx);
+          } else if (hitX === 1) {
+            ball.vel.dx = -Math.abs(ball.vel.dx);
+          }
+          if (hitY === -1) {
+            ball.vel.dy = Math.abs(ball.vel.dy);
+          } else if (hitY === 1) {
+            ball.vel.dy = -Math.abs(ball.vel.dy);
+          }
+
+          if (!Number.isFinite(ball.vel.dx) || !Number.isFinite(ball.vel.dy)) {
+            ball.vel = { dx: 0, dy: 0 };
+            ball.speed = 0;
+            ball.state = 'idle';
+            continue;
           }
 
           soundEngineRef.current?.playBounce(ball.speed);
