@@ -27,6 +27,7 @@ import {
   BALL_COLLISION_SOUND_THROTTLE_MS,
   GAMES_DEPLOYMENT_BASE_PATH,
   BALL_COLLISION_RESTITUTION,
+  COLLISION_EPSILON,
 } from '@/lib/constants';
 
 // ─── Ball type ────────────────────────────────────────────────────────────────
@@ -444,14 +445,14 @@ export default function CanvasScene() {
           let nx = 0;
           let ny = 0;
           let dist = Math.sqrt(distSq);
-          if (dist > 0.0001) {
+          if (dist > COLLISION_EPSILON) {
             nx = dx / dist;
             ny = dy / dist;
           } else {
             const rvx = b.vel.dx - a.vel.dx;
             const rvy = b.vel.dy - a.vel.dy;
             const rvMag = Math.sqrt(rvx * rvx + rvy * rvy);
-            if (rvMag > 0.0001) {
+            if (rvMag > COLLISION_EPSILON) {
               nx = rvx / rvMag;
               ny = rvy / rvMag;
             } else {
