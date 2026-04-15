@@ -23,10 +23,11 @@ export const INTERIOR_CRACK_INTERVAL_RANGE = 2200;
 export const TRAIL_STEP_PX = 3;
 /** Maximum number of ghost circles drawn per frame for the motion trail. */
 export const TRAIL_MAX_STEPS = 24;
+/** Minimum interval between ball-vs-ball collision click sounds. */
+export const BALL_COLLISION_SOUND_THROTTLE_MS = 40;
 
 // Silence detection
 export const SILENCE_TIMEOUT = 1500;
 export const SILENCE_VOLUME_THRESHOLD = 0.05;
 /** Volume multiplier above SILENCE_VOLUME_THRESHOLD required to auto-relaunch a stopped ball. */
 export const AUTO_RELAUNCH_VOLUME_MULTIPLIER = 2.5;
-

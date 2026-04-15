@@ -24,10 +24,12 @@ import {
   INTERIOR_CRACK_INTERVAL_RANGE,
   TRAIL_STEP_PX,
   TRAIL_MAX_STEPS,
+  BALL_COLLISION_SOUND_THROTTLE_MS,
 } from '@/lib/constants';
 
 // ─── Ball type ────────────────────────────────────────────────────────────────
 interface Ball {
+  // Balls are simulated as equal-mass circles for pairwise collision response.
   pos: { x: number; y: number };
   prevPos: { x: number; y: number };
   vel: { dx: number; dy: number };
@@ -485,7 +487,10 @@ export default function CanvasScene() {
         }
       }
 
-      if (maxCollisionImpact > 0 && now - lastBallCollisionSoundTimeRef.current > 40) {
+      if (
+        maxCollisionImpact > 0 &&
+        now - lastBallCollisionSoundTimeRef.current > BALL_COLLISION_SOUND_THROTTLE_MS
+      ) {
         soundEngineRef.current?.playBallCollision(maxCollisionImpact);
         lastBallCollisionSoundTimeRef.current = now;
       }
